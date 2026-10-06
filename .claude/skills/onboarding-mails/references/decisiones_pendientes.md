@@ -13,7 +13,7 @@ aplicarlo en silencio.
 | 3 | ¿Calendly por onboarder o uno general de Clay? | Por onboarder: usa el link que el onboarder te indique en la conversación. Si no lo tenés, pregúntalo — no inventes ni dejes un link genérico. |
 | 4 | ¿Cómo se maneja el envío si el cliente tiene múltiples usuarios? | Enviar solo al contacto principal (`{{email_contacto_principal}}` de HubSpot) en Para + `ob@clay.cl` en CC. Si el onboarder pide incluir a más gente, agrégalos en CC, pero no lo hagas por defecto. |
 | 5 | ¿El skill puede ejecutarse manualmente fuera de las fechas automáticas? | Sí — siempre se ejecuta a pedido del onboarder en el chat (o de la rutina `seguimiento-onboarding` de Claude Code), calculando igual la fecha/semana correspondiente para dar contexto. |
-| 6 | ¿Cómo se detecta si una empresa tiene estructura de grupo (madre/hijas)? | **✅ Resuelto (agosto 2026):** propiedades de HubSpot en el objeto companies: `rut_empresa_madre` (si la empresa es hija) y `rut_empresas_hijas` (si es madre), confirmadas vía `search_properties`. Se usa `hs_parent_company_id` (asociación nativa) solo como respaldo/cruce si los dos campos de RUT faltan o no coinciden — no lo reemplaza. |
+| 6 | ¿Cómo se detecta si una empresa tiene estructura de grupo (madre/hijas)? | **✅ Resuelto — actualizado (septiembre 2026):** dashboard 607, pestaña "Próximos Pasos" (`staging_marts.organizations_checklist_grupo`, cards 6230-6234 y 6301 vía `execute_card`). Reemplaza el approach anterior de propiedades de HubSpot (`rut_empresa_madre`, `rut_empresas_hijas`, `hs_parent_company_id`) — ver "Historial: por qué se dejó de usar HubSpot para grupo" abajo. |
 | 7 | ¿El % de asientos hechos por Cassius viene calculado en el dashboard 607? | **✅ Resuelto (actualizado el 7 de agosto de 2026):** sí — Piero agregó las columnas `% asientos cassius` y `% asientos manual` directo a la card 6206 el 6 de agosto. Ya no hace falta calcularlas a mano (`asientos_por_cassius / asientos_contables_totales`); usar las columnas directo, ver `references/variables.md`. |
 
 ## Historial: cómo se llegó a usar el dashboard 607 (julio 2026)
@@ -51,3 +51,92 @@ registros de organización duplicados** en `sources.organizations` (RUTs
 `false` para las 5.434 organizaciones de la tabla (no sirve como señal). Si
 en el futuro se vuelve a tocar `sources.*` directamente, tener esto en
 cuenta.
+
+## Historial: por qué se dejó de usar HubSpot para detectar grupo (septiembre 2026)
+
+La v1 de esta skill (julio-agosto 2026) detectaba la estructura de grupo
+consultando `rut_empresa_madre` y `rut_empresas_hijas` en HubSpot
+(companies). En la práctica esto fallaba en el chat: al no tener un lugar
+único y confiable donde verificar esos campos (propiedades a veces vacías,
+o el modelo no sabía bien dónde ir a buscarlas), la detección de grupo
+quedaba inconsistente.
+
+Josefa señaló que Piero ya había armado, directo en el dashboard 607
+("Onboarding - Progreso y Checklist"), pestaña **"Próximos Pasos"**
+(`analytics.clay.cl/dashboard/607-onboarding-progreso-y-checklist?tab=569-pr%C3%B3ximos-pasos`),
+una sección completa dedicada a esto: la tabla
+`staging_marts.organizations_checklist_grupo` (columnas `nombre_grupo`,
+`rol` = `Madre`/`Hija`, `nombre_empresa`, `area`, `tarea`, `estado`,
+`fecha_completado`) y los cards 6230-6234 y 6301 que calculan sobre ella el
+checklist y la conciliación agregada de las hijas. Se validó con
+"INVERSIONES FOIL SPA" (la madre) y su hija "CONSTRUCTORA PACIFICO BOX
+SPA": el card 6230 sin filtro trae la fila
+`nombre_grupo=INVERSIONES FOIL SPA, rol=Hija, nombre_empresa=CONSTRUCTORA
+PACIFICO BOX SPA, ...` — dato real, no inventado.
+
+Como esta tabla ya vive en la misma colección "Onboarding" y el mismo
+`database_id` (40) que `organizations_onboarding_progress` y
+`organizations_checklist_status` (las que ya usa el resto de la skill), se
+adoptó como fuente única también para grupo — evita depender de que las
+propiedades de HubSpot estén bien cargadas y mantiene todo el dato de
+onboarding en un solo lugar. **Esta es la fuente vigente**, ver
+`references/mails_seguimiento.md` sección "0. Detectar estructura de
+grupo".
+
+### Bug encontrado en la primera prueba real (Camila, septiembre 2026): % Cassius de las hijas venía vacío
+
+Camila (onboarder) probó la skill con INVERSIONES FOIL SPA: el resumen
+agregado trajo bien las 11 hijas y sus tareas pendientes (cards 6230-6234),
+pero las columnas de % Match Cassius y % Asientos Cassius (card 6301)
+salieron `—` en todas las filas, aun en empresas con asientos y movimientos
+reales.
+
+Causa: a diferencia de las cards 6230-6234, la SQL de la card 6301 tiene el
+filtro `WHERE nombre_grupo = {{nombre_empresa}}` **sin** envolver en
+`[[ ]]` — es un parámetro obligatorio. El MCP de Metabase no tiene forma de
+pasarle ese parámetro a `execute_card`, así que ejecutarla sin filtro no
+devuelve "todo sin filtrar" (como sí pasa con 6230-6234) sino un error 400.
+El modelo interpretó ese error como "sin datos" y completó todo con `—` en
+vez de reportar el problema.
+
+**Primer intento de fix (no funcionó para todos): `execute_query`.** Se
+confirmó que corriendo la SQL exacta de la card 6301 vía `execute_query`
+(database_id 40), con `nombre_grupo = 'INVERSIONES FOIL SPA'` puesto
+directo en el texto, sí traía los 11 registros con datos reales (ej.
+Constructora Pacifico Box SPA: 99.3% de asientos por Cassius; Parque
+Chagual SPA: 0%, consistente con que le falta "Realizar primera
+conciliación bancaria"). Se documentó ese workaround en las referencias y
+se le pidió a Camila que probara de nuevo.
+
+**Camila probó de nuevo y siguió saliendo vacío.** Esta vez el mail trajo
+una nota explícita: "dato no disponible en este reporte (restricción de
+acceso puntual a la fuente de conciliación agregada)". Eso reveló el
+problema real: `execute_query` corre SQL nativo contra la base de datos, y
+no todas las cuentas/sesiones de Metabase tienen permiso de "SQL nativo"
+(a diferencia de ejecutar cards ya guardadas, que sí tienen todos). El
+workaround funcionaba en la sesión que lo probó (con permisos más amplios)
+pero no en la de Camila — por eso "usar `execute_query` en vez de
+`execute_card`" no era una solución robusta, aunque el diagnóstico del
+parámetro obligatorio sí era correcto.
+
+**✅ Fix real (8 de septiembre de 2026): se corrigió la card 6301 en
+Metabase**, no la skill. Se usó `update_card` para envolver el filtro en
+`[[AND nombre_grupo = {{nombre_empresa}}]]`, igual que 6230-6234 (antes era
+`WHERE nombre_grupo = {{nombre_empresa}} AND rol = 'Hija'` sin corchetes).
+Verificado: `execute_card` sin filtro ahora devuelve las 40 hijas de todos
+los grupos sin error, con los mismos valores reales que había traído
+`execute_query` antes. Con esto la card 6301 se ejecuta exactamente igual
+que 6230-6234 (`execute_card` sin filtro + filtro local por
+`nombre_grupo`), sin depender de permisos de SQL nativo — cualquier
+onboarder puede usarla. Se limpiaron las referencias
+(`mails_seguimiento.md`, `variables.md`) para reflejar esto y se sacó la
+mención a `execute_query`.
+
+**Lección para el futuro:** si una card de este dashboard vuelve a salir
+"vacía" para todos, antes de asumir que es un dato faltante real, verificá
+si `execute_card` sin filtro tira error — puede ser un parámetro
+obligatorio mal configurado en la card, no falta de datos. Y si el fix
+depende de un tool distinto a `execute_card` (como `execute_query`), no
+asumas que todas las sesiones/onboarders tienen el mismo nivel de permisos
+en Metabase — verificalo con una prueba real antes de darlo por
+resuelto.
