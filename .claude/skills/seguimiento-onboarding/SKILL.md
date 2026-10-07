@@ -1,6 +1,6 @@
 ---
 name: seguimiento-onboarding
-description: "Genera los borradores de los mails de avance de onboarding (semanas 2, 4 y 6) para el onboarder que ejecuta el comando, a partir de sus tareas 'Mandar mail de avance a las N semanas' abiertas en HubSpot. Descarta a los clientes con contacto reciente o sin tareas pendientes y deja nota en el ticket. Pensada para correr de forma desatendida de lunes a viernes a las 10:00 (hora de Chile), o manualmente con /seguimiento-onboarding. Requiere la skill 'onboarding-mails' en el mismo proyecto, además de HubSpot MCP, Metabase Clay, Gmail MCP y Slack MCP."
+description: "Genera los borradores de los mails de avance de onboarding (semanas 2, 4 y 6) para el onboarder que ejecuta el comando, a partir de sus tareas 'Mandar mail de avance a las N semanas' abiertas en HubSpot. Descarta a los clientes con contacto reciente o sin tareas pendientes y deja nota en el ticket. Pensada para correr de forma desatendida de lunes a viernes a las 9:00 (hora de Chile), o manualmente con /seguimiento-onboarding. Requiere la skill 'onboarding-mails' en el mismo proyecto, además de HubSpot MCP, Metabase Clay, Gmail MCP y Slack MCP."
 ---
 
 # Rutina: seguimiento de onboarding (semanas 2, 4 y 6)
@@ -178,13 +178,13 @@ Si no había tareas de avance para hoy, manda igual:
 Si falla el envío a Slack, no reviertas borradores ni notas: reporta el
 fallo en el resumen que devuelves.
 
-## Cuándo corre: días hábiles a las 10:00
+## Cuándo corre: días hábiles a las 9:00
 
-La rutina corre **de lunes a viernes a las 10:00 (hora de Chile,
+La rutina corre **de lunes a viernes a las 9:00 (hora de Chile,
 America/Santiago)**, una vez al día. Cron de referencia:
 
 ```
-CRON_TZ=America/Santiago 0 10 * * 1-5
+CRON_TZ=America/Santiago 47 8 * * 1-5
 ```
 
 - **Fin de semana:** no corre. Las tareas que vencen sábado o domingo
